@@ -1,7 +1,5 @@
 # Controle Notas Fiscais de Servico Tkinter
 
----Script de esboço inicial---
-
 
 Objetivos
 
