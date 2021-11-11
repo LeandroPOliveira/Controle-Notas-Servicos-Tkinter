@@ -7,6 +7,9 @@ from tkinter import filedialog as fd
 import os
 from datetime import date
 from openpyxl.reader.excel import load_workbook
+from fpdf import FPDF
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
 
 class NotasServicos:
@@ -82,7 +85,7 @@ class NotasServicos:
 
             def gerar_relatorios():
                 #Criar planilha para gerar arquivo
-                writer = pd.ExcelWriter(entr_dir.get() + '\Relatórios.xlsx', engine='xlsxwriter')
+                writer = pd.ExcelWriter(self.entr_dir.get() + '\Relatórios.xlsx', engine='xlsxwriter')
                 #Conectar ao banco
                 lmdb = os.getcwd() + '\Base_notas.accdb;'
                 cnx = pyodbc.connect(r'DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};'r'DBQ=' + lmdb)
@@ -120,18 +123,87 @@ class NotasServicos:
 
                 #===========================Relatório ISS ==========================================================#
                 if check_iss.get() == 1:
-                    cursor.execute('select data, NF, cnpj, fornecedor, cidade, valor_bruto, iss from notas_fiscais '
-                    'where DateValue(data_analise) >= DateValue(?) and DateValue(data_analise) <= DateValue(?)'
-                                   'order by cidade, cnpj',
-                    (dt_1.get(), dt_2.get()))
-                    resultado = cursor.fetchall()
-                    lista3 = [[], [], [], [], [], [], []]
-                    for i in resultado:
-                        for l in range(7):
-                            lista3[l].append(i[l])
-                    tabela3 = pd.DataFrame(lista3).transpose()
-                    tabela3.columns = ['Data Nota Fiscal', 'Nº NF', 'CNPJ', 'Fornecedor', 'Município', 'Valor Bruto', 'ISS']
-                    tabela3.to_excel(writer, sheet_name='ISS', index=False)
+                    lmdb = os.getcwd() + '\\base_notas.accdb;'
+                    cnx = pyodbc.connect(r'DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};'r'DBQ=' + lmdb)
+                    cursor = cnx.cursor()
+
+                    cursor.execute('select distinct cidade from notas_fiscais where DateValue(data_analise) >= '
+                                   'DateValue(?) and DateValue(data_analise) <= DateValue(?)', (dt_1.get(), dt_2.get()))
+                    lista = []
+                    for row in cursor:
+                        if row[0] != '':
+                            lista.append(row[0])
+
+                    for i in lista:
+                        cursor.execute('select NF, fornecedor, iss from notas_fiscais '
+                                       'where DateValue(data_analise) >= DateValue(?) and DateValue(data_analise) <= DateValue(?)'
+                                       'and cidade = ? order by cidade, cnpj', (dt_1.get(), dt_2.get(), i))
+
+
+                        vencimentos = pd.read_excel('G:\GECOT\FISCAL - Retenções\\Programa Planilha de retenção.xlsx',
+                                                    sheet_name='Relatório ISS', usecols=[9, 10], skiprows=10, dtype=str)
+
+                        for index, row in vencimentos.iterrows():
+                            if row['MUNICÍPIOS'] == i.upper():
+                                dia = vencimentos.loc[index, 'DIA']
+                                data = datetime.strptime(dt_2.get(), '%d/%m/%Y')
+                                data = data + relativedelta(months=1)
+                                data = data.strftime('%m/%Y')
+                                data_venc = dia + '/' + data
+
+                        pdf = FPDF(orientation='P', unit='mm', format='A4')
+                        pdf.add_page()
+                        pdf_w = 210
+                        pdf_h = 297
+                        pdf.set_font('Arial', 'B', 10)
+                        pdf.image('G:\GECOT\FISCAL - Retenções\logo.png', x=10.0, y=10.0,
+                                  h=50.0, w=100.0)
+                        pdf.set_xy(10.0, 70.0)
+                        pdf.multi_cell(w=125, h=5, txt='ISSQN Município de ' + i)
+                        pdf.multi_cell(w=125, h=5, txt='A/C: Contabilidade - Contas a Pagar.')
+                        pdf.set_xy(10.0, pdf.get_y() + 5)
+                        pdf.multi_cell(w=150, h=5,
+                                       txt='Planilha contendo valores a recolher referente ao mês ' + dt_2.get()[3:])
+                        pdf.multi_cell(w=125, h=5, txt='Valor a recolher através de BOLETO ANEXO - Contas a Pagar.')
+                        pdf.multi_cell(w=125, h=5, txt='Vencimento: ' + data_venc)
+                        pdf.set_xy(10.0, pdf.get_y() + 15)
+                        pdf.multi_cell(w=30, h=5, txt='Nota Fiscal', border=1, align='C')
+                        pdf.set_xy(40.0, pdf.get_y() - 5)
+                        pdf.multi_cell(w=80, h=5, txt='Fornecedor', border=1, align='C')
+                        pdf.set_xy(120.0, pdf.get_y() - 5)
+                        pdf.multi_cell(w=40, h=5, txt='ISS a recolher', border=1, align='C')
+                        pdf.set_font('')
+                        resultado = cursor.fetchall()
+                        soma = []
+                        cont = 0
+                        for lin in resultado:
+                            lin[2] = float(lin[2])
+                            soma.append(lin[2])
+                            lin[2] = str(lin[2]).replace('.', ',')
+                            pdf.multi_cell(w=30, h=5, txt=str(lin[0]), border=1, align='C')
+                            pdf.set_xy(40.0, pdf.get_y() - 5)
+                            pdf.multi_cell(w=80, h=5, txt=str(lin[1][:32]), border=1, align='C')
+                            pdf.set_xy(120.0, pdf.get_y() - 5)
+                            pdf.multi_cell(w=40, h=5, txt=str(lin[2]), border=1, align='C')
+                            cont += 1
+                        for l in range(20 - cont):
+                            pdf.multi_cell(w=30, h=5, txt='', border=1)
+                            pdf.set_xy(40.0, pdf.get_y() - 5)
+                            pdf.multi_cell(w=80, h=5, txt='', border=1)
+                            pdf.set_xy(120.0, pdf.get_y() - 5)
+                            pdf.multi_cell(w=40, h=5, txt='', border=1)
+                        pdf.set_xy(40.0, pdf.get_y())
+                        pdf.multi_cell(w=80, h=5, txt='Valor total a recolher', border=1, align='C')
+                        pdf.set_xy(120.0, pdf.get_y() - 5)
+                        pdf.set_font('Arial', 'B', 10)
+                        pdf.multi_cell(w=40, h=5, txt=str(round(sum(soma), 2)), border=1, align='C')
+                        pdf.set_xy(10.0, pdf.get_y() + 30)
+                        pdf.line(10, pdf.get_y(), 60, pdf.get_y())
+                        pdf.multi_cell(w=100, h=5, txt='Pedro Henrique Carrilho')
+                        pdf.multi_cell(w=100, h=5, txt='Contador Junior')
+                        pdf.multi_cell(w=40, h=5, txt='GECOT')
+                        data = dt_2.get()[3:].replace('/', '-')
+                        pdf.output(i + ' ' + data + '.pdf', 'F')
 
                 #===========================Relatório INSS==========================================================#
                 if check_inss.get() == 1:
@@ -145,7 +217,7 @@ class NotasServicos:
                         for l in range(6):
                             lista4[l].append(i[l])
                     tabela4 = pd.DataFrame(lista4).transpose()
-                    tabela4.columns =  ['Data Nota Fiscal', 'Nº NF', 'CNPJ', 'Fornecedor', 'Valor Bruto', 'INSS']
+                    tabela4.columns = ['Data Nota Fiscal', 'Nº NF', 'CNPJ', 'Fornecedor', 'Valor Bruto', 'INSS']
                     tabela4.to_excel(writer, sheet_name='INSS', index=False)
                 else:
                     pass
@@ -155,10 +227,10 @@ class NotasServicos:
             # intervalo de datas dos relatórios
             dt_1 = Entry(rel_frame, bd=5, font=fonte, width=10)
             dt_1.place(x=200, y=70)
-            # dt_1.insert(0, '01/01/2021')
+            # dt_1.insert(0, '01/10/2021')
             dt_2 = Entry(rel_frame, bd=5, font=fonte, width=10)
             dt_2.place(x=380, y=70)
-            # dt_2.insert(0, '28/02/2021')
+            # dt_2.insert(0, '31/10/2021')
 
             btn_rel = Button(rel_frame, font=('arial', 14, 'bold'), text='Gerar Relatórios', bd=4, pady=1, padx=24,
                              width=12, height=1, command=gerar_relatorios).place(x=230, y=400)
@@ -177,7 +249,7 @@ class NotasServicos:
             font=('arial', 12), variable=check_crf)
             btncheck_crf.place(x=250, y=200)
             btncheck_iss = tkinter.Checkbutton(rel_frame, text='Imposto sobre serviços', onvalue=1, offvalue=0,
-            font=('arial', 12), variable=check_iss, state='disabled')
+            font=('arial', 12), variable=check_iss) #state='disabled')
             btncheck_iss.place(x=250, y=240)
             btncheck_inss = tkinter.Checkbutton(rel_frame, text='Imposto s/ Seguridade Social', onvalue=1, offvalue=0,
             font=('arial', 12), variable=check_inss)
@@ -186,13 +258,13 @@ class NotasServicos:
             # selecionar diretório
             def sel_diretorio():
                 diretorio = fd.askdirectory(title='Abrir diretório')
-                entr_dir.delete(0, END)
-                entr_dir.insert(0, diretorio)
+                self.entr_dir.delete(0, END)
+                self.entr_dir.insert(0, diretorio)
                 relat.lift()
 
-            entr_dir = Entry(rel_frame, width=28, font=12, bd=2)
-            entr_dir.place(x=150, y=350)
-            entr_dir.insert(0, os.getcwd())
+            self.entr_dir = Entry(rel_frame, width=28, font=12, bd=2)
+            self.entr_dir.place(x=150, y=350)
+            self.entr_dir.insert(0, os.getcwd())
             btn_dir = Button(rel_frame, text='Selecionar Diretório', command=sel_diretorio, bd=4)
             btn_dir.place(x=420, y=345)
 
@@ -701,8 +773,11 @@ class NotasServicos:
             float(self.inss.get().replace(',','.')), float(self.iss.get().replace(',','.'))])), 2)).replace('.',','))
 
         def data_dia(ev):
-            self.data_ana.delete(0, END)
-            self.data_ana.insert(0, date.today().strftime('%d/%m/%Y'))
+            if self.data_nota.get() == '':
+                self.data_ana.delete(0, END)
+                self.data_ana.insert(0, date.today().strftime('%d/%m/%Y'))
+            else:
+                pass
 
         # Definindo entradas
         self.id = Entry(leftframe)
